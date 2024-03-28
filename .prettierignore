@@ -1,0 +1,4 @@
+# ignore validators
+node_modules
+dist
+firestore-data
