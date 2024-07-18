@@ -5,7 +5,7 @@ const loggingBunyan = new LoggingBunyan();
 const logger = bunyan.createLogger({
   // The JSON payload of the log as it appears in Cloud Logging
   // will contain "name": "my-service"
-  name: 'expense-manager-node-api',
+  name: 'ind-app-node-api',
   streams: [
     // Log to the console at 'info' and above
     { stream: process.stdout, level: 'info' },
