@@ -10,9 +10,19 @@ const dispatcher = new Agent({
 const customFetch = (input: RequestInfo | URL, init?: RequestInit) => {
   if (input instanceof Request) {
     const { url, method, headers, body } = input;
-    return uFetch(url, { ...init, method, headers, body, dispatcher } as any);
+    return uFetch(url, {
+      ...init,
+      method,
+      headers,
+      body,
+      duplex: body ? 'half' : undefined,
+      dispatcher,
+    } as any);
   }
-  return uFetch(input as any, { ...init, dispatcher } as any);
+  return uFetch(
+    input as any,
+    { ...init, duplex: init?.body ? 'half' : undefined, dispatcher } as any,
+  );
 };
 
 const getKy = async () => {
