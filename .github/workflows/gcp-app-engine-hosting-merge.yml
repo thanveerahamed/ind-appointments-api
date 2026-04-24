@@ -16,8 +16,17 @@ jobs:
         with:
           credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
       - name: Install node dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
       - name: Deploy to google cloud
         run: |
           gcloud config set project ind-appointments

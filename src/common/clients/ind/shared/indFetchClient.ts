@@ -31,7 +31,11 @@ export const makeFetchCall = async <T>({
 
   const response = await ky(`${IND_HOST}/${path}`, {
     ...requestInit,
-    retry: { limit: 3, methods: ['get', 'post'], statusCodes: [408, 500, 502, 503, 504] },
+    retry: {
+      limit: 3,
+      methods: ['get', 'post'],
+      statusCodes: [408, 500, 502, 503, 504],
+    },
     timeout: 15000,
   });
 
@@ -54,7 +58,11 @@ export const apiGet = async <T>(
   const response = await ky
     .get(`${IND_HOST}/${path}${buildSearchParams(params)}`, {
       headers: getDefaultHeaders(),
-      retry: { limit: 3, methods: ['get'], statusCodes: [408, 500, 502, 503, 504] },
+      retry: {
+        limit: 3,
+        methods: ['get'],
+        statusCodes: [408, 500, 502, 503, 504],
+      },
       timeout: 15000,
     })
     .text();
@@ -74,7 +82,11 @@ export const apiPost = async <T>(
     .post(`${IND_HOST}/${path}${buildSearchParams(params)}`, {
       json: body,
       headers: getDefaultHeaders(),
-      retry: { limit: 3, methods: ['post'], statusCodes: [408, 500, 502, 503, 504] },
+      retry: {
+        limit: 3,
+        methods: ['post'],
+        statusCodes: [408, 500, 502, 503, 504],
+      },
       timeout: 15000,
     })
     .text();
@@ -82,4 +94,3 @@ export const apiPost = async <T>(
   const data = parseIndResponse(response);
   return data.data as T;
 };
-
