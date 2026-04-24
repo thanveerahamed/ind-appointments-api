@@ -5,6 +5,10 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   build:
     name: GAE Deploy
@@ -14,7 +18,8 @@ jobs:
       - name: Gcp Auth
         uses: 'google-github-actions/auth@v2'
         with:
-          credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
+          workload_identity_provider: '${{ secrets.WIF_PROVIDER }}'
+          service_account: '${{ secrets.WIF_SERVICE_ACCOUNT }}'
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4

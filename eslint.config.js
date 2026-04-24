@@ -3,7 +3,13 @@ const tsparser = require('@typescript-eslint/parser');
 
 module.exports = [
   {
-    ignores: ['dist/**', 'firestore-data/**', '.github/**', 'node_modules/**', 'eslint.config.js'],
+    ignores: [
+      'dist/**',
+      'firestore-data/**',
+      '.github/**',
+      'node_modules/**',
+      'eslint.config.js',
+    ],
   },
   {
     files: ['**/*.{js,ts}'],
@@ -21,4 +27,3 @@ module.exports = [
     },
   },
 ];
-
