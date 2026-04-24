@@ -1,5 +1,7 @@
 /node_modules/
 /dist
 .env*
+key.json
+*.json.bak
 /firestore-data/
 *.log
