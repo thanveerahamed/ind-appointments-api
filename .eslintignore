@@ -1,7 +1,0 @@
-.eslintrc.js
-dist
-firestore-data
-.github
-node_modules
-.env.*
-*.log
