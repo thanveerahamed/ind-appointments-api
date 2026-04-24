@@ -1,5 +1,4 @@
 import { IND_HOST } from './constants';
-import { IndResponse } from './types';
 
 const getKy = async () => {
   const { default: ky } = await import('ky');
@@ -9,44 +8,22 @@ const getKy = async () => {
 export const parseIndResponse = (response: string) =>
   JSON.parse(response.replace(")]}',\n", ''));
 
-const getDefaultHeaders = (): Record<string, string> => ({
-  'Content-Type': 'application/json',
-  'oap-locale': 'en',
-});
+const getDefaultHeaders = (
+  method: 'GET' | 'POST' = 'GET',
+): Record<string, string> => {
+  const headers: Record<string, string> = {
+    'Accept': 'application/json',
+    'oap-locale': 'en',
+  };
+  if (method === 'POST') {
+    headers['Content-Type'] = 'application/json';
+  }
+  return headers;
+};
 
 const buildSearchParams = (params: Record<string, string>): string => {
   const searchParams = new URLSearchParams(params).toString();
   return searchParams ? `?${searchParams}` : '';
-};
-
-export const makeFetchCall = async <T>({
-  path,
-  requestInit = {},
-}: {
-  path: string;
-  requestInit?: RequestInit;
-}): Promise<T> => {
-  const ky = await getKy();
-  console.log(path, requestInit);
-
-  const response = await ky(`${IND_HOST}/${path}`, {
-    ...requestInit,
-    retry: {
-      limit: 3,
-      methods: ['get', 'post'],
-      statusCodes: [408, 500, 502, 503, 504],
-    },
-    timeout: 15000,
-  });
-
-  const responseString = await response.text();
-  const jsonResult = parseIndResponse(responseString) as IndResponse;
-
-  if (response.status !== 200 || jsonResult.status !== 'OK') {
-    throw new Error((jsonResult.error as string) ?? 'Unknown error');
-  }
-
-  return jsonResult.data as T;
 };
 
 export const apiGet = async <T>(
@@ -57,7 +34,8 @@ export const apiGet = async <T>(
 
   const response = await ky
     .get(`${IND_HOST}/${path}${buildSearchParams(params)}`, {
-      headers: getDefaultHeaders(),
+      headers: getDefaultHeaders('GET'),
+      throwHttpErrors: false,
       retry: {
         limit: 3,
         methods: ['get'],
@@ -81,7 +59,8 @@ export const apiPost = async <T>(
   const response = await ky
     .post(`${IND_HOST}/${path}${buildSearchParams(params)}`, {
       json: body,
-      headers: getDefaultHeaders(),
+      headers: getDefaultHeaders('POST'),
+      throwHttpErrors: false,
       retry: {
         limit: 3,
         methods: ['post'],
