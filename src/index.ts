@@ -7,8 +7,6 @@ import { indApiRouter } from './indApi/indApi.router';
 
 dotenv.config();
 
-process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
-
 const startServer = async (): Promise<void> => {
   if (!process.env.PORT) {
     process.exit(1);

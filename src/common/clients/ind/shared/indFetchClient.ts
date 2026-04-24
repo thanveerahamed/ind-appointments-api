@@ -1,8 +1,23 @@
 import { IND_HOST } from './constants';
+import { Agent, fetch as uFetch } from 'undici';
+
+const dispatcher = new Agent({
+  connect: {
+    rejectUnauthorized: false,
+  },
+});
+
+const customFetch = (input: RequestInfo | URL, init?: RequestInit) => {
+  if (input instanceof Request) {
+    const { url, method, headers, body } = input;
+    return uFetch(url, { ...init, method, headers, body, dispatcher } as any);
+  }
+  return uFetch(input as any, { ...init, dispatcher } as any);
+};
 
 const getKy = async () => {
   const { default: ky } = await import('ky');
-  return ky;
+  return ky.create({ fetch: customFetch as any });
 };
 
 export const parseIndResponse = (response: string) =>
