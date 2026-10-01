@@ -1,34 +1,14 @@
 import { IND_HOST } from './constants';
-import { Agent, fetch as uFetch } from 'undici';
+import type { IndResponse } from './types';
+import axios, { AxiosError } from 'axios';
+import https from 'node:https';
 
-const dispatcher = new Agent({
-  connect: {
-    rejectUnauthorized: false,
-  },
+const axiosClient = axios.create({
+  baseURL: IND_HOST,
+  timeout: 15000,
+  httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+  validateStatus: () => true,
 });
-
-const customFetch = (input: RequestInfo | URL, init?: RequestInit) => {
-  if (input instanceof Request) {
-    const { url, method, headers, body } = input;
-    return uFetch(url, {
-      ...init,
-      method,
-      headers,
-      body,
-      duplex: body ? 'half' : undefined,
-      dispatcher,
-    } as any);
-  }
-  return uFetch(
-    input as any,
-    { ...init, duplex: init?.body ? 'half' : undefined, dispatcher } as any,
-  );
-};
-
-const getKy = async () => {
-  const { default: ky } = await import('ky');
-  return ky.create({ fetch: customFetch as any });
-};
 
 export const parseIndResponse = (response: string) =>
   JSON.parse(response.replace(")]}',\n", ''));
@@ -46,32 +26,64 @@ const getDefaultHeaders = (
   return headers;
 };
 
-const buildSearchParams = (params: Record<string, string>): string => {
-  const searchParams = new URLSearchParams(params).toString();
-  return searchParams ? `?${searchParams}` : '';
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const withRetry = async <T>(
+  fn: () => Promise<T>,
+  retries = 3,
+  backoff = 1000,
+): Promise<T> => {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const isRetryable =
+        err instanceof AxiosError &&
+        (err.code === 'ECONNRESET' ||
+          err.code === 'ECONNABORTED' ||
+          err.code === 'ETIMEDOUT' ||
+          err.code === 'ERR_NETWORK' ||
+          (err.response?.status && err.response.status >= 500));
+
+      if (!isRetryable || attempt === retries) throw err;
+      await delay(backoff * Math.pow(2, attempt));
+    }
+  }
+  throw new Error('Retry failed');
+};
+
+const handleIndResponse = <T>(responseData: string | object): T => {
+  const parsed = (
+    typeof responseData === 'string'
+      ? parseIndResponse(responseData)
+      : responseData
+  ) as IndResponse;
+
+  if (parsed.status !== 'OK') {
+    const rawMessage = parsed.errorCode ?? parsed.error ?? 'Unknown error';
+    const message =
+      typeof rawMessage === 'string' ? rawMessage : JSON.stringify(rawMessage);
+    const error = new Error(message);
+    (error as any).code = parsed.errorCode;
+    (error as any).data = parsed.data;
+    throw error;
+  }
+
+  return parsed.data as T;
 };
 
 export const apiGet = async <T>(
   path: string,
   params: Record<string, string> = {},
 ) => {
-  const ky = await getKy();
-
-  const response = await ky
-    .get(`${IND_HOST}/${path}${buildSearchParams(params)}`, {
+  return withRetry(async () => {
+    const response = await axiosClient.get(`/${path}`, {
       headers: getDefaultHeaders('GET'),
-      throwHttpErrors: false,
-      retry: {
-        limit: 3,
-        methods: ['get'],
-        statusCodes: [408, 500, 502, 503, 504],
-      },
-      timeout: 15000,
-    })
-    .text();
+      params,
+    });
 
-  const data = parseIndResponse(response);
-  return data.data as T;
+    return handleIndResponse<T>(response.data);
+  });
 };
 
 export const apiPost = async <T>(
@@ -79,22 +91,12 @@ export const apiPost = async <T>(
   body: any,
   params: Record<string, string> = {},
 ) => {
-  const ky = await getKy();
-
-  const response = await ky
-    .post(`${IND_HOST}/${path}${buildSearchParams(params)}`, {
-      json: body,
+  return withRetry(async () => {
+    const response = await axiosClient.post(`/${path}`, body, {
       headers: getDefaultHeaders('POST'),
-      throwHttpErrors: false,
-      retry: {
-        limit: 3,
-        methods: ['post'],
-        statusCodes: [408, 500, 502, 503, 504],
-      },
-      timeout: 15000,
-    })
-    .text();
+      params,
+    });
 
-  const data = parseIndResponse(response);
-  return data.data as T;
+    return handleIndResponse<T>(response.data);
+  });
 };
