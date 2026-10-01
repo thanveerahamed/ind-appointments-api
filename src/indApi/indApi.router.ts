@@ -47,8 +47,12 @@ indApiRouter.post('/rest', async (req: Request, res: Response) => {
       default:
         res.status(200).send([]);
     }
-  } catch (e) {
+  } catch (e: any) {
     logError(e);
-    res.status(500).send(e);
+    res.status(400).send({
+      error: e.message ?? 'Unknown error',
+      code: e.code ?? undefined,
+      data: e.data ?? undefined,
+    });
   }
 });

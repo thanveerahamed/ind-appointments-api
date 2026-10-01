@@ -2,3 +2,4 @@
 node_modules
 dist
 firestore-data
+pnpm-lock.yaml
