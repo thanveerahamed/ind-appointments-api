@@ -1,13 +1,11 @@
 import { IND_HOST } from './constants';
 import type { IndResponse } from './types';
-import axios, { AxiosError } from 'axios';
-import https from 'node:https';
+import { Agent, fetch as undiciFetch } from 'undici';
 
-const axiosClient = axios.create({
-  baseURL: IND_HOST,
-  timeout: 15000,
-  httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-  validateStatus: () => true,
+const dispatcher = new Agent({
+  connect: {
+    rejectUnauthorized: false,
+  },
 });
 
 export const parseIndResponse = (response: string) =>
@@ -28,29 +26,34 @@ const getDefaultHeaders = (
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const withRetry = async <T>(
-  fn: () => Promise<T>,
-  retries = 3,
-  backoff = 1000,
-): Promise<T> => {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const isRetryable =
-        err instanceof AxiosError &&
-        (err.code === 'ECONNRESET' ||
-          err.code === 'ECONNABORTED' ||
-          err.code === 'ETIMEDOUT' ||
-          err.code === 'ERR_NETWORK' ||
-          (err.response?.status && err.response.status >= 500));
+const getErrorCode = (error: unknown): string | undefined => {
+  if (typeof error !== 'object' || error === null) return undefined;
+  if ('code' in error && typeof error.code === 'string') return error.code;
 
-      if (!isRetryable || attempt === retries) throw err;
-      await delay(backoff * Math.pow(2, attempt));
-    }
+  const cause = 'cause' in error ? error.cause : undefined;
+  if (
+    typeof cause === 'object' &&
+    cause !== null &&
+    'code' in cause &&
+    typeof cause.code === 'string'
+  ) {
+    return cause.code;
   }
-  throw new Error('Retry failed');
+  return undefined;
 };
+
+const isRetryableError = (error: unknown): boolean =>
+  [
+    'ECONNRESET',
+    'ECONNABORTED',
+    'ETIMEDOUT',
+    'ERR_NETWORK',
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UND_ERR_HEADERS_TIMEOUT',
+    'UND_ERR_BODY_TIMEOUT',
+    'UND_ERR_SOCKET',
+    'ABORT_ERR',
+  ].includes(getErrorCode(error) ?? '');
 
 const handleIndResponse = <T>(responseData: string | object): T => {
   const parsed = (
@@ -76,14 +79,7 @@ export const apiGet = async <T>(
   path: string,
   params: Record<string, string> = {},
 ) => {
-  return withRetry(async () => {
-    const response = await axiosClient.get(`/${path}`, {
-      headers: getDefaultHeaders('GET'),
-      params,
-    });
-
-    return handleIndResponse<T>(response.data);
-  });
+  return request<T>('GET', path, undefined, params);
 };
 
 export const apiPost = async <T>(
@@ -91,12 +87,34 @@ export const apiPost = async <T>(
   body: any,
   params: Record<string, string> = {},
 ) => {
-  return withRetry(async () => {
-    const response = await axiosClient.post(`/${path}`, body, {
-      headers: getDefaultHeaders('POST'),
-      params,
-    });
+  return request<T>('POST', path, body, params);
+};
 
-    return handleIndResponse<T>(response.data);
-  });
+const request = async <T>(
+  method: 'GET' | 'POST',
+  path: string,
+  body: unknown,
+  params: Record<string, string>,
+): Promise<T> => {
+  const url = new URL(`${IND_HOST}/${path}`);
+  url.search = new URLSearchParams(params).toString();
+
+  const retries = 3;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await undiciFetch(url, {
+        method,
+        headers: getDefaultHeaders(method),
+        body: body === undefined ? undefined : JSON.stringify(body),
+        dispatcher,
+        signal: AbortSignal.timeout(15000),
+      });
+      const responseBody = await response.text();
+      return handleIndResponse<T>(responseBody);
+    } catch (error) {
+      if (!isRetryableError(error) || attempt === retries) throw error;
+      await delay(1000 * Math.pow(2, attempt));
+    }
+  }
+  throw new Error('Retry failed');
 };
