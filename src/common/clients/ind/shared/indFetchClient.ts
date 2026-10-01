@@ -1,6 +1,7 @@
 import { IND_HOST } from './constants';
 import type { IndResponse } from './types';
 import { Agent, fetch as undiciFetch } from 'undici';
+import { logError, logInfo } from '../../../logging';
 
 const dispatcher = new Agent({
   connect: {
@@ -26,34 +27,46 @@ const getDefaultHeaders = (
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const getErrorCode = (error: unknown): string | undefined => {
-  if (typeof error !== 'object' || error === null) return undefined;
-  if ('code' in error && typeof error.code === 'string') return error.code;
+const getErrorChain = (error: unknown): Record<string, unknown>[] => {
+  const chain: Record<string, unknown>[] = [];
+  let current = error;
+  let depth = 0;
 
-  const cause = 'cause' in error ? error.cause : undefined;
-  if (
-    typeof cause === 'object' &&
-    cause !== null &&
-    'code' in cause &&
-    typeof cause.code === 'string'
-  ) {
-    return cause.code;
+  while (typeof current === 'object' && current !== null && depth < 5) {
+    const item: Record<string, unknown> = {};
+    for (const key of [
+      'name',
+      'message',
+      'code',
+      'syscall',
+      'address',
+      'port',
+      'stack',
+    ]) {
+      if (key in current) item[key] = current[key as keyof typeof current];
+    }
+    chain.push(item);
+    current = 'cause' in current ? current.cause : undefined;
+    depth++;
   }
-  return undefined;
+
+  return chain;
 };
 
 const isRetryableError = (error: unknown): boolean =>
-  [
-    'ECONNRESET',
-    'ECONNABORTED',
-    'ETIMEDOUT',
-    'ERR_NETWORK',
-    'UND_ERR_CONNECT_TIMEOUT',
-    'UND_ERR_HEADERS_TIMEOUT',
-    'UND_ERR_BODY_TIMEOUT',
-    'UND_ERR_SOCKET',
-    'ABORT_ERR',
-  ].includes(getErrorCode(error) ?? '');
+  getErrorChain(error).some(({ code }) =>
+    [
+      'ECONNRESET',
+      'ECONNABORTED',
+      'ETIMEDOUT',
+      'ERR_NETWORK',
+      'UND_ERR_CONNECT_TIMEOUT',
+      'UND_ERR_HEADERS_TIMEOUT',
+      'UND_ERR_BODY_TIMEOUT',
+      'UND_ERR_SOCKET',
+      'ABORT_ERR',
+    ].includes(typeof code === 'string' ? code : ''),
+  );
 
 const handleIndResponse = <T>(responseData: string | object): T => {
   const parsed = (
@@ -101,6 +114,10 @@ const request = async <T>(
 
   const retries = 3;
   for (let attempt = 0; attempt <= retries; attempt++) {
+    const startedAt = Date.now();
+    let status: number | undefined;
+    let responseBody: string | undefined;
+
     try {
       const response = await undiciFetch(url, {
         method,
@@ -109,11 +126,48 @@ const request = async <T>(
         dispatcher,
         signal: AbortSignal.timeout(15000),
       });
-      const responseBody = await response.text();
-      return handleIndResponse<T>(responseBody);
+      status = response.status;
+      responseBody = await response.text();
+      const result = handleIndResponse<T>(responseBody);
+
+      logInfo(
+        {
+          method,
+          host: url.host,
+          path: url.pathname,
+          query: url.search,
+          status,
+          durationMs: Date.now() - startedAt,
+          attempt: attempt + 1,
+        },
+        'IND request succeeded',
+      );
+      return result;
     } catch (error) {
-      if (!isRetryableError(error) || attempt === retries) throw error;
-      await delay(1000 * Math.pow(2, attempt));
+      const retryable = isRetryableError(error);
+      const shouldRetry = retryable && attempt < retries;
+      const delayMs = 1000 * Math.pow(2, attempt);
+
+      logError(
+        {
+          method,
+          host: url.host,
+          path: url.pathname,
+          query: url.search,
+          status,
+          responseBodySnippet: responseBody?.slice(0, 500),
+          durationMs: Date.now() - startedAt,
+          attempt: attempt + 1,
+          maxAttempts: retries + 1,
+          retryable,
+          retryDelayMs: shouldRetry ? delayMs : undefined,
+          error: getErrorChain(error),
+        },
+        'IND request failed',
+      );
+
+      if (!shouldRetry) throw error;
+      await delay(delayMs);
     }
   }
   throw new Error('Retry failed');
